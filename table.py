@@ -1,7 +1,8 @@
 import pymysql
 import datetime
 
-description = ('name','type_code','display_size','internal_size','precision','scale','null_ok')
+# description = ('name','type_code','display_size','internal_size','precision','scale','null_ok')
+description = ('name','COLUMN_TYPE','display_size','internal_size','precision','scale','null_ok')
 
 data_types = {
 	   0: 'DECIMAL', 
@@ -59,6 +60,8 @@ def display(row, c, null, meta=None):
 		type_code = meta[c][1]
 	if type_code in [12]:
 		return str(val)
+	if meta is None and c == 1:
+		return data_types[val]
 	return val
 
 def pretty_table(lens,meta,data,row_template,head_template,null=None):
