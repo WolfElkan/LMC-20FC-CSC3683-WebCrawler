@@ -4,7 +4,7 @@ USE Crawler;
 
 create table Crawl (
 	CrawlID INT primary key auto_increment,
-    StartTime DATETIME
+    StartTime DATETIME default NOW()
 );
 
 create table Webpage (
