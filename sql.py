@@ -10,27 +10,66 @@ db_params = {
 	'autocommit':True,
 }
 
-def insert(db, table, data=None, columns=set([]),quiet=False):
+tables = {}
+
+db = pymysql.connect(**db_params)
+ShowTables = db.cursor()
+ShowTables.execute('SHOW TABLES')
+
+def get_columns(table):
+	return set(tables[table])
+
+
+# print dir(cursor)
+# print cursor
+
+for table in ShowTables:
+	# print table
+	DescribeTable = db.cursor()
+	DescribeTable.execute('DESCRIBE '+table[0])
+	table_columns = [x[0].lower() for x in DescribeTable]
+	tables[table[0]] = table_columns
+
+# print tables
+
+def insert1(db, table, **data):
+	quiet = False
+	if 'quiet' in data:
+		quiet = data['quiet']
+		del data['quiet']
+	# print data
+	return insert(db, table, [data], quiet=quiet)
+
+def insert(db, table, data=None, quiet=False):
+	# Make `data` keys lowercase
+	data = [ dict([ (k.lower(),row[k]) for k in row ]) for row in data ]
+	# FastFail
 	if data is None:
 		query = "INSERT INTO {} VALUES ();".format(table)
 	else:
+		# FastFail
 		if len(data) == 0:
-			return 0
-		cursor = db.cursor()
-		if not columns:
-			for row in data:
-				if row:
-					for key in row.keys():
-						columns.add(key)
-		cursor.execute('DESCRIBE '+table)
-		columns &= set([x[0] for x in cursor])
+			return None
+		data_columns = set([])
+		for row in data:
+			if row:
+				for key in row.keys():
+					data_columns.add(key.lower())
+		# print 'data', data
+		# print 'data columns', data_columns
+		# print 'table', table
+		table_columns = get_columns(table)
+		# print 'table columns', table_columns
+		columns = data_columns & table_columns
 		columns = list(columns)
+		# print 'columns', columns
 		values = []
 		for row in data:
 			valrow = []
 			allblank = True
 			for key in columns:
-				if row and key in row and row[key] is not None:
+				# print row
+				if row and key.lower() in row and row[key.lower()] is not None:
 					valrow.append(row[key])
 					allblank = False
 				else:
@@ -50,13 +89,11 @@ def insert(db, table, data=None, columns=set([]),quiet=False):
 		query = query.replace(",)",")")
 	if not quiet:
 		print query
-	cursor = db.cursor()
-	return cursor.execute(query)
+	MainQuery = db.cursor()
+	MainQuery.execute(query)
+	return MainQuery.lastrowid
 
 
-m = [
-	{'url':1,'bar':2},
-	{'url':3,'jud':8}
-]
+db.close()
 
 # print insert(cursor,table='Webpage',data=m)
