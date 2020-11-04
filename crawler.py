@@ -35,6 +35,8 @@ def select_or_insert(db, table, **kwery):
 	if 'quiet' in kwery:
 		quiet = kwery['quiet']
 		del kwery['quiet']
+	else:
+		quiet = False
 	cursor = db.cursor()
 	query = ', '.join([ '`'+kv[0]+'`='+stringify(kv[1]) for kv in kwery.items() ])
 	query = 'SELECT * from {} WHERE {} LIMIT 1'.format(table, query)
@@ -52,15 +54,27 @@ def select_or_insert(db, table, **kwery):
 
 def crawl(root,re=r'.*',quiet=False):
 	cursor = db.cursor()
+
 	RootPageID = select_or_insert(db, 'Webpage', url=urls[0], quiet=quiet)
 	print RootPageID
 	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID)
 	soup = get_soup(root)
 	print CrawlID
 	insert1(db, 'Observation', WID=RootPageID, CID=CrawlID, html=str(soup), quiet=True)
-	# discovered = get_links(soup, url)
-	# for url in discovered:
-	# 	insert1(db, 'Webpage', url=url)
+
+	discovered = get_links(soup, root)
+	discovered = [ link for link in discovered ]
+	discovered_wids = set([])
+	for url in discovered:
+		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(url)))
+	discovered_wids = list(discovered_wids)
+	discovered_wids.sort()
+	discovered_wids = [ str(wid) for wid in discovered_wids ]
+	query = 'UPDATE Webpage SET newCID={cid} WHERE wid IN ({wids});'.format(cid=CrawlID, wids=','.join(discovered_wids))
+	if not quiet:
+		print query
+	cursor.execute(query)
+	# discovered_wids
 	# insert(db, 'Link', [ {'fromID':RootPageID, 'toID':select_or_insert(db,'Webpage',url=url)} for url in discovered ])
 
 
@@ -74,7 +88,7 @@ print crawl(url,quiet=False)
 
 # insert1(db, 'Observation', WID=1, CID=1)
 
-# cursor.execute('SHOW TABLES')
+# cursor.execute('SELECT * FROM Webpage')
 # pretty(cursor)
 
 # print insert(db, 'Table', [{'fOo':1,'GaR':2},{'fOO':3,'gAr':7}])

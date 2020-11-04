@@ -10,7 +10,8 @@ create table Crawl (
 
 create table Webpage (
 	WID INT primary key auto_increment,
-	url VARCHAR(2048)
+	url VARCHAR(2048),
+    newCID INT REFERENCES Crawl(CID)
     -- protocol VARCHAR(10),
     -- subdomain VARCHAR(16),
     -- domain VARCHAR(64),
