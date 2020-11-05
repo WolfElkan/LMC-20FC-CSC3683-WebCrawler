@@ -39,7 +39,7 @@ def select_or_insert(db, table, **kwery):
 		quiet = False
 	cursor = db.cursor()
 	query = ', '.join([ '`'+kv[0]+'`='+stringify(kv[1]) for kv in kwery.items() ])
-	query = 'SELECT * from {} WHERE {} LIMIT 1'.format(table, query)
+	query = 'SELECT * from {} WHERE {} LIMIT 1;'.format(table, query)
 	if not quiet:
 		print query
 	cursor.execute(query)
@@ -50,17 +50,25 @@ def select_or_insert(db, table, **kwery):
 		return insert(db, table, [kwery], quiet=quiet)
 
 
-	
+def mine(url, cid, quiet=False):
+	soup = get_soup(url)
+	wid = select_or_insert(db, 'Webpage', url=url)
+	oid = insert1(db, 'Observation', WID=wid, CID=cid, html=str(soup), quiet=True)
+	query = 'UPDATE Webpage SET mined=True WHERE wid={};'.format(str(wid))
+	if not quiet:
+		print query
+	cursor.execute(query)
+	return soup
 
-def crawl(root,re=r'.*',quiet=False):
+def crawl(root,level=4,CrawlID=None,quiet=False):
 	cursor = db.cursor()
 
 	RootPageID = select_or_insert(db, 'Webpage', url=urls[0], quiet=quiet)
-	print RootPageID
-	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID)
-	soup = get_soup(root)
-	print CrawlID
-	insert1(db, 'Observation', WID=RootPageID, CID=CrawlID, html=str(soup), quiet=True)
+	
+	if CrawlID is None:
+		CrawlID = insert1(db, 'Crawl', rootwid=RootPageID)
+
+	soup = mine(root, CrawlID, quiet=quiet)
 
 	discovered = get_links(soup, root)
 	discovered = [ link for link in discovered ]
@@ -74,8 +82,23 @@ def crawl(root,re=r'.*',quiet=False):
 	if not quiet:
 		print query
 	cursor.execute(query)
-	# discovered_wids
-	# insert(db, 'Link', [ {'fromID':RootPageID, 'toID':select_or_insert(db,'Webpage',url=url)} for url in discovered ])
+	insert(db, 'Link', [ {'fromID':RootPageID, 'toID':url} for url in discovered_wids ])
+
+	while level > 1:
+		query = 'SELECT wid, url FROM Webpage WHERE newCID = {cid} AND mined=False;'.format(cid=CrawlID)
+		if not quiet:
+			print query
+		cursor.execute(query)
+		for wid, url in cursor:
+			# print url
+			mine(url, CrawlID, quiet)
+			# crawl(url,level-1,CrawlID,quiet=quiet)
+		level -= 1
+	query = 'UPDATE Crawl SET endtime={now} WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
+	if not quiet:
+		print query
+
+
 
 
 
@@ -84,7 +107,11 @@ url = urls[0]
 # for x in get_links(soup,url):
 # 	print x
 
-print crawl(url,quiet=False)
+try:
+	print crawl(url,quiet=False)
+except Exception as e:
+	print datetime.datetime.now()
+	raise e
 
 # insert1(db, 'Observation', WID=1, CID=1)
 
