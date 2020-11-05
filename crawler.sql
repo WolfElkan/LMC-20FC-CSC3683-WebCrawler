@@ -6,6 +6,7 @@ create table Crawl (
 	CID INT primary key auto_increment,
     starttime DATETIME default NOW(),
     endtime DATETIME,
+    nLevels INT,
     rootWID INT references Webpage(WID)
 );
 

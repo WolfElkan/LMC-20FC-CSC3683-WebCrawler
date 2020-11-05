@@ -59,13 +59,11 @@ def mine(url, cid, quiet=False):
 		cursor.execute(query)
 	return soup
 
-def crawl(root,regex=r'^.*$',level=4,CrawlID=None,quiet=False):
+def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	cursor = db.cursor()
 
 	RootPageID = select_or_insert(db, 'Webpage', url=root, quiet=quiet)
-	
-	if CrawlID is None:
-		CrawlID = insert1(db, 'Crawl', rootwid=RootPageID)
+	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID, nLevels=level)
 
 	soup = mine(root, CrawlID, quiet=quiet)
 
@@ -87,6 +85,7 @@ def crawl(root,regex=r'^.*$',level=4,CrawlID=None,quiet=False):
 		query = 'SELECT wid, url FROM Webpage WHERE newCID = {cid} AND mined=False;'.format(cid=CrawlID)
 		if not quiet:
 			print query
+		cursor = db.cursor()
 		cursor.execute(query)
 		for wid, url in cursor:
 			print 'level:', level
@@ -100,12 +99,14 @@ def crawl(root,regex=r'^.*$',level=4,CrawlID=None,quiet=False):
 	cursor.execute(query)
 	db.close()
 
-url = 'https://www.landmark.edu/'
+url = 'https://www.gordon.edu/'
 
 try:
-	crawl(url,quiet=False, level=10, regex=r'^https?://www\.landmark\.edu.*')
+	crawl(url, quiet=False, level=10, regex=r'^https?://www\.gordon\.edu.*')
 	pass
 except Exception as e:
 	print datetime.datetime.now()
 	db.close()
 	raise
+
+
