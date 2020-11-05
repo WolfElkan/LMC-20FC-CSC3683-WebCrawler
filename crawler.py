@@ -12,6 +12,7 @@ def get_soup(url):
 	try:
 		page = urllib2.urlopen(url)
 	except Exception as e:
+		print e
 		return False
 	else:
 		soup = BeautifulSoup(page.read(), 'html.parser')
@@ -52,7 +53,7 @@ def mine(url, cid, quiet=False):
 	soup = get_soup(url)
 	if soup:
 		wid = select_or_insert(db, 'Webpage', url=url)
-		oid = insert1(db, 'Observation', WID=wid, CID=cid, html=str(soup), quiet=True)
+		oid = insert1(db, 'Observation', WID=wid, CID=cid, html=unicode(soup), quiet=True)
 		query = 'UPDATE Webpage SET mined=True WHERE wid={};'.format(str(wid))
 		if not quiet:
 			print query
@@ -75,10 +76,13 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	discovered_wids = list(discovered_wids)
 	discovered_wids.sort()
 	discovered_wids = [ str(wid) for wid in discovered_wids ]
-	query = 'UPDATE Webpage SET newCID={cid} WHERE wid IN ({wids});'.format(cid=CrawlID, wids=','.join(discovered_wids))
-	if not quiet:
-		print query
-	cursor.execute(query)
+	if len(discovered_wids):
+		query = 'UPDATE Webpage SET newCID={cid} WHERE wid IN ({wids});'.format(cid=CrawlID, wids=','.join(discovered_wids))
+		if not quiet:
+			print query
+		cursor.execute(query)
+	else:
+		print 'No links'
 	insert(db, 'Link', [ {'fromID':RootPageID, 'toID':url} for url in discovered_wids ])
 
 	while level > 0:
@@ -99,14 +103,28 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	cursor.execute(query)
 	db.close()
 
-url = 'https://www.gordon.edu/'
+# url = 'https://bulbapedia.bulbagarden.net/wiki/Main_Page'
+url = 'https://pokemon.fandom.com/wiki/Pok%C3%A9mon_Wiki'
 
-try:
-	crawl(url, quiet=False, level=10, regex=r'^https?://www\.gordon\.edu.*')
-	pass
-except Exception as e:
-	print datetime.datetime.now()
-	db.close()
-	raise
+def docrawl(url):
+	try:
+		crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki.*')
+		pass
+	except Exception as e:
+		cursor = db.cursor()
+		cursor.execute('SELECT CID FROM Crawl WHERE isnull(endtime) ORDER BY starttime DESC LIMIT 1;')
+		CrawlID = cursor.fetchone()[0]
+		query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
+		print query
+		cursor.execute(query)
+		db.close()
+		raise
+
+docrawl(url)
+
+# print get_soup(url)
 
 
+# cursor = db.cursor()
+# cursor.execute('SELECT CID FROM Crawl WHERE isnull(endtime) ORDER BY starttime DESC LIMIT 1;')
+# print cursor.fetchone()[0]
