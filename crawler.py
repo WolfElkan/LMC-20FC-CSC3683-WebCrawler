@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from sql import db_params, insert, insert1
 from table import pretty, lodify
 from parse_url import parse_url, rebuild
+from utf import escape
 
 db = pymysql.connect(**db_params)
 cursor = db.cursor()
@@ -53,12 +54,23 @@ def mine(url, cid, quiet=False):
 	soup = get_soup(url)
 	if soup:
 		wid = select_or_insert(db, 'Webpage', url=url)
-		oid = insert1(db, 'Observation', WID=wid, CID=cid, html=unicode(soup), quiet=True)
+		oid = insert1(db, 'Observation', 
+			WID=wid, 
+			CID=cid, 
+			# html=unicode(soup), 
+			quiet=True,
+		)
 		query = 'UPDATE Webpage SET mined=True WHERE wid={};'.format(str(wid))
 		if not quiet:
 			print query
 		cursor.execute(query)
 	return soup
+
+def decode(text):
+	# text = bytes(text)
+	# print text
+	return "".join(i if ord(i)<128 else escape(ord(i),'%').upper() for i in text)
+	# return text
 
 def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	cursor = db.cursor()
@@ -72,7 +84,8 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	discovered = filter(lambda link: re.match(regex, link), discovered)
 	discovered_wids = set([])
 	for url in discovered:
-		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(url)))
+		curl = decode(url)
+		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(curl)))
 	discovered_wids = list(discovered_wids)
 	discovered_wids.sort()
 	discovered_wids = [ str(wid) for wid in discovered_wids ]
@@ -82,7 +95,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 			print query
 		cursor.execute(query)
 	else:
-		print 'No links'
+		print '-- No links'
 	insert(db, 'Link', [ {'fromID':RootPageID, 'toID':url} for url in discovered_wids ])
 
 	while level > 0:
@@ -92,11 +105,11 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 		cursor = db.cursor()
 		cursor.execute(query)
 		for wid, url in cursor:
-			print 'level:', level
 			# print url
 			mine(url, CrawlID, quiet)
 			# crawl(url,level-1,CrawlID,quiet=quiet)
 		level -= 1
+		print '-- Level:', level
 	query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
 	if not quiet:
 		print query
@@ -104,11 +117,11 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	db.close()
 
 # url = 'https://bulbapedia.bulbagarden.net/wiki/Main_Page'
-url = 'https://pokemon.fandom.com/wiki/Pok%C3%A9mon_Wiki'
+url = 'https://pokemon.fandom.com/wiki/List_of_Pok%C3%A9mon'
 
 def docrawl(url):
 	try:
-		crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki.*')
+		crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki/[A-Za-z0-9]*')
 		pass
 	except Exception as e:
 		cursor = db.cursor()
