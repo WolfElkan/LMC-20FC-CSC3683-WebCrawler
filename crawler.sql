@@ -14,7 +14,7 @@ create table Webpage (
 	WID INT primary key auto_increment,
 	url VARCHAR(2048),
     newCID INT REFERENCES Crawl(CID),
-    mined BOOLEAN default FALSE
+    mined BOOLEAN default FALSE,
     -- protocol VARCHAR(10),
     -- subdomain VARCHAR(16),
     -- domain VARCHAR(64),
@@ -23,20 +23,22 @@ create table Webpage (
     -- query VARCHAR(256),
     -- ext VARCHAR(8),
     -- fragment VARCHAR(16)
+    created_at DATETIME default NOW()
 );
 
 create table Observation (
 	OID INT primary key auto_increment,
     WID INT references Webpage(WID),
     CID INT references Crawl(CID),
-    obstime DATETIME DEFAULT NOW(),
     http INT,
-    html LONGTEXT
+    html LONGTEXT,
+    created_at DATETIME default NOW()
 );
 
 create table Link (
 	lID INT PRIMARY KEY auto_increment,
-    fromID INT references Webpage(wID),
-    toID INT references Webpage(wID)
+    fromWID INT references Webpage(WID),
+    toWID INT references Webpage(WID),
+    created_at DATETIME default NOW()
 );
     

@@ -55,5 +55,3 @@ def escape(codepoint, ec='\\x'):
 
 # n = 128
 # print [ bin(b) for b in utf(n) ]
-
-print escape(233,'%')

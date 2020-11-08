@@ -13,17 +13,16 @@ def get_soup(url):
 	try:
 		page = urllib2.urlopen(url)
 	except Exception as e:
-		print e
+		print '--', e, url
 		return False
 	else:
 		soup = BeautifulSoup(page.read(), 'html.parser')
 		return soup
 
-
-def get_links(soup, url):
+def get_links(soup, url, re=r'^.*$'):
 	if not soup:
 		return set([])
-	return set([ urllib2.urlparse.urljoin(url,a.attrs.get('href')) for a in soup.findAll('a') ])
+	return set([ clean(urllib2.urlparse.urljoin(url,a.attrs.get('href'))) for a in soup.findAll('a') ])
 
 def stringify(value):
 	if type(value) in [str,unicode]:
@@ -49,27 +48,62 @@ def select_or_insert(db, table, **kwery):
 	else:
 		return insert(db, table, [kwery], quiet=quiet)
 
-
-def mine(url, cid, quiet=False):
+def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 	soup = get_soup(url)
 	if soup:
-		wid = select_or_insert(db, 'Webpage', url=url)
+
+		if wid is None:
+			wid = select_or_insert(db, 'Webpage', url=url)
+
+		# Record the mined data
 		oid = insert1(db, 'Observation', 
 			WID=wid, 
 			CID=cid, 
 			# html=unicode(soup), 
 			quiet=True,
 		)
-		query = 'UPDATE Webpage SET mined=True WHERE wid={};'.format(str(wid))
+
+		# Record that this link has been mined
+		query = 'UPDATE Webpage SET mined=True WHERE wid IN ({});'.format(str(wid))
 		if not quiet:
 			print query
 		cursor.execute(query)
+
+		links = get_links(soup, url)
+		links = set(filter(lambda link: re.match(regex, link), links))
+
+		if links:
+			sqlinks = ','.join([ stringify(link.replace('"','%22')) for link in links ])
+			query = 'SELECT wid FROM Webpage WHERE url IN ({});'.format(sqlinks)
+			if not quiet:
+				print query
+			cursor.execute(query)
+		
+		# insert(db, 'Link', [ {'fromWID':str(clean(url)),'toWID':row[0]} for row in cursor ], quiet=quiet)
+		insert(db, 'Link', [ {'fromWID':wid,'toWID':row[0]} for row in cursor ], quiet=quiet)
+
+		if links:
+			sqlinks = ','.join([ stringify(link) for link in links ])
+			query = 'SELECT url FROM Webpage WHERE url IN ({});'.format(sqlinks)
+			if not quiet:
+				print query
+			cursor.execute(query)
+
+			already = set([ row[0] for row in cursor ])
+			links -= already
+
+		if links:
+			sqlinks = ','.join([ stringify(link) for link in links ])
+			insert(db, 'Webpage', [ {'url':str(url),'newCID':cid} for url in links ], quiet=quiet)
+
 	return soup
 
-def decode(text):
+def clean(text):
 	# text = bytes(text)
 	# print text
 	return "".join(i if ord(i)<128 else escape(ord(i),'%').upper() for i in text)
+	if type(text) is unicode:
+		text = str(text)
 	# return text
 
 def crawl(root,regex=r'^.*$',level=1,quiet=False):
@@ -78,13 +112,13 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	RootPageID = select_or_insert(db, 'Webpage', url=root, quiet=quiet)
 	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID, nLevels=level)
 
-	soup = mine(root, CrawlID, quiet=quiet)
+	soup = mine(root, cid=CrawlID, wid=RootPageID, quiet=quiet, regex=regex)
 
 	discovered = get_links(soup, root)
 	discovered = filter(lambda link: re.match(regex, link), discovered)
 	discovered_wids = set([])
 	for url in discovered:
-		curl = decode(url)
+		curl = clean(url)
 		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(curl)))
 	discovered_wids = list(discovered_wids)
 	discovered_wids.sort()
@@ -96,7 +130,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 		cursor.execute(query)
 	else:
 		print '-- No links'
-	insert(db, 'Link', [ {'fromID':RootPageID, 'toID':url} for url in discovered_wids ])
+	insert(db, 'Link', [ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
 
 	while level > 0:
 		query = 'SELECT wid, url FROM Webpage WHERE newCID = {cid} AND mined=False;'.format(cid=CrawlID)
@@ -106,7 +140,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 		cursor.execute(query)
 		for wid, url in cursor:
 			# print url
-			mine(url, CrawlID, quiet)
+			mine(url, cid=CrawlID, wid=wid, quiet=quiet, regex=regex)
 			# crawl(url,level-1,CrawlID,quiet=quiet)
 		level -= 1
 		print '-- Level:', level
@@ -117,11 +151,13 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	db.close()
 
 # url = 'https://bulbapedia.bulbagarden.net/wiki/Main_Page'
-url = 'https://pokemon.fandom.com/wiki/List_of_Pok%C3%A9mon'
+# url = 'https://pokemon.fandom.com/wiki/List_of_Pok%C3%A9mon'
+url = 'https://www.landmark.edu/'
 
 def docrawl(url):
 	try:
-		crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki/[A-Za-z0-9]*')
+		# crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki/[A-Za-z0-9]*')
+		crawl(url, quiet=False, level=10, regex=r'^https?://www\.landmark\.edu/*')
 		pass
 	except Exception as e:
 		cursor = db.cursor()
@@ -133,7 +169,31 @@ def docrawl(url):
 		db.close()
 		raise
 
-docrawl(url)
+# docrawl(url)
+
+query = 'SELECT fromWID, toWID FROM Link'
+cursor.execute(query)
+pretty(cursor)
+
+# n = 4528
+# # n = 10
+
+# row = [0]*(n+1)
+# matrix = [ row[:] for x in range(n+1) ]
+
+# # matrix[8][3] = 1
+# for fromWID, toWID in cursor:
+# 	print fromWID, toWID
+# 	# try:
+# 	# 	matrix[fromWID][toWID] = 1
+# 	# except Exception as e:
+# 	# 	print fromWID, toWID
+# 	# 	raise
+
+# for row in matrix:
+# 	print ','.join([ str(x) for x in row ])
+
+db.close()
 
 # print get_soup(url)
 
