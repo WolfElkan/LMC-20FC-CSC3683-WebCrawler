@@ -23,7 +23,7 @@ create table Webpage (
     -- query VARCHAR(256),
     -- ext VARCHAR(8),
     -- fragment VARCHAR(16)
-    created_at DATETIME default NOW()
+    created_at DATETIME(6) default NOW(6)
 );
 
 create table Observation (
@@ -32,13 +32,26 @@ create table Observation (
     CID INT references Crawl(CID),
     http INT,
     html LONGTEXT,
-    created_at DATETIME default NOW()
+    created_at DATETIME(6) default NOW(6)
 );
 
 create table Link (
 	lID INT PRIMARY KEY auto_increment,
     fromWID INT references Webpage(WID),
     toWID INT references Webpage(WID),
-    created_at DATETIME default NOW()
+    created_at DATETIME(6) default NOW(6)
 );
+
+create table Stem (
+	stem VARCHAR(25) PRIMARY KEY,
+    created_at DATETIME(6) default NOW(6)
+);
+
+create table Word (
+	RID INT primary key auto_increment,
+	stem VARCHAR(25) references Stem(stem),
+    OID INT references Observation(OID),
+    pos INT,
+    created_at DATETIME(6) default NOW(6)
+)
     

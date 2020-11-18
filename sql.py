@@ -1,5 +1,7 @@
 import pymysql
 from pw import password
+from table import lodify
+from utf import escape
 
 db_params = {
 	'host':"127.0.0.1",
@@ -32,6 +34,26 @@ for table in ShowTables:
 
 # print tables
 
+def clean(text):
+	# text = bytes(text)
+	# print text
+	return "".join(i if ord(i)<128 else escape(ord(i),'%').upper() for i in text)
+	if type(text) is unicode:
+		text = str(text)
+	# return text
+
+def stringify(value):
+	if type(value) is str:
+		return '"'+value+'"'
+	elif type(value) is unicode:
+		return str('"'+clean(value)+'"')
+	else:
+		return str(value)
+
+def stringify_if_unicode(value):
+	if type(value) is unicode:
+		return stringify(value)
+
 def insert1(db, table, **data):
 	quiet = False
 	if 'quiet' in data:
@@ -40,11 +62,13 @@ def insert1(db, table, **data):
 	# print data
 	return insert(db, table, [data], quiet=quiet)
 
+
+# `data` formatted as a lod
 def insert(db, table, data=None, quiet=False):
 	# Make `data` keys lowercase
-	data = [ dict([ (k.lower(),row[k]) for k in row ]) for row in data ]
+	data = [ dict([ (k.lower(), stringify_if_unicode(row[k])) for k in row ]) for row in data ]
 	# FastFail
-	if data is None:
+	if data is None or not any([ any(record.values()) for record in data ]):
 		query = "INSERT INTO {} VALUES ();".format(table)
 	else:
 		# FastFail
@@ -78,20 +102,25 @@ def insert(db, table, data=None, quiet=False):
 				values.append('-- Empty Record')
 			else:
 				values.append(str(tuple(valrow)))
-		query = 'INSERT INTO {} (`{}`) VALUES {};'
+		query = 'INSERT INTO {} ( `{}` ) VALUES {};'
 		joiner = ', '
 		if len(data) > 1:
-			query = 'INSERT INTO {} (`{}`) VALUES \n\t{};'
+			query = 'INSERT INTO {} ( `{}` ) VALUES \n\t{};'
 			joiner = ',\n\t'
 		values = joiner.join(values)
 		query = query.format(table,'`, `'.join(columns),values)
 		query = query.replace("'NULL'","NULL")
 		query = query.replace(",)",")")
-	if not quiet:
-		print query
 	MainQuery = db.cursor()
+	LastIn = db.cursor()
+	lastin = 'SELECT * FROM {} ORDER BY created_at DESC LIMIT {};'.format(table, len(data))
+	if not quiet:
+		print query, '-- query'
+		print lastin, '-- lastin'
 	MainQuery.execute(query)
-	return MainQuery.lastrowid
+	LastIn.execute(lastin)
+	return lodify(LastIn)
+	# else:
 
 
 db.close()

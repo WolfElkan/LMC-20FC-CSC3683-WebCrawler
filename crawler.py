@@ -1,9 +1,12 @@
 import urllib2, re, datetime, pymysql
 from bs4 import BeautifulSoup
-from sql import db_params, insert, insert1
+from sql import db_params, insert, insert1, stringify, clean
 from table import pretty, lodify
 from parse_url import parse_url, rebuild
-from utf import escape
+from stem import PorterStemmer
+from stopwords import default, cap
+
+default = cap(default)
 
 db = pymysql.connect(**db_params)
 cursor = db.cursor()
@@ -24,13 +27,9 @@ def get_links(soup, url, re=r'^.*$'):
 		return set([])
 	return set([ clean(urllib2.urlparse.urljoin(url,a.attrs.get('href'))) for a in soup.findAll('a') ])
 
-def stringify(value):
-	if type(value) in [str,unicode]:
-		return '"'+value+'"'
-	else:
-		return str(value)
-
 def select_or_insert(db, table, **kwery):
+	print
+	print
 	if 'quiet' in kwery:
 		quiet = kwery['quiet']
 		del kwery['quiet']
@@ -43,25 +42,52 @@ def select_or_insert(db, table, **kwery):
 		print query
 	cursor.execute(query)
 	if cursor.rowcount:
-		return cursor.fetchone()[0]
-		# return lodify(cursor)
+		print 'yes'
+		return lodify(cursor)
 	else:
+		print 'no'
 		return insert(db, table, [kwery], quiet=quiet)
+
+porter = PorterStemmer()
+
+def stem(p):
+	# p = re.match(r"^.*?[A-Za-z0-9']")
+	m = re.match(r"^\s*[<(]*(.*?)[.,?!:)>/]*\s*$", p)
+	if m:
+		p = m.groups()[0]
+	p = porter.stem(p, 0, len(p)-1).upper()[:25]
+	p = clean(p)
+	return p
+
+def parse_text(text, oid):
+	words = [ stem(word) for word in re.split(r'\s+',text) ]
+	words = filter(lambda word: word, words)
+	words = enumerate(words)
+	words = filter(lambda word: word[1] not in default, words)
+	words = [ str(word) for word in words ]
+	words = [ (word[0], select_or_insert(db, 'Stem', stem=word[1])[0]['stem']) for word in words ]
+	words = [ {
+		'stem':word[1],
+		'oid':oid,
+		'pos':word[0],
+	} for word in words ]
+	return insert(db, 'Word', words)
 
 def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 	soup = get_soup(url)
 	if soup:
 
 		if wid is None:
-			wid = select_or_insert(db, 'Webpage', url=url)
+			wid = select_or_insert(db, 'Webpage', url=url)[0]['WID']
 
 		# Record the mined data
 		oid = insert1(db, 'Observation', 
 			WID=wid, 
 			CID=cid, 
-			# html=unicode(soup), 
+			# html=unicode(soup.text), 
 			quiet=True,
-		)
+		)[0]['OID']
+		parse_text(soup.text, oid)
 
 		# Record that this link has been mined
 		query = 'UPDATE Webpage SET mined=True WHERE wid IN ({});'.format(str(wid))
@@ -98,19 +124,11 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 
 	return soup
 
-def clean(text):
-	# text = bytes(text)
-	# print text
-	return "".join(i if ord(i)<128 else escape(ord(i),'%').upper() for i in text)
-	if type(text) is unicode:
-		text = str(text)
-	# return text
-
 def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	cursor = db.cursor()
 
-	RootPageID = select_or_insert(db, 'Webpage', url=root, quiet=quiet)
-	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID, nLevels=level)
+	RootPageID = select_or_insert(db, 'Webpage', url=root, quiet=quiet)[0]['WID']
+	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID, nLevels=level)[0]['CID']
 
 	soup = mine(root, cid=CrawlID, wid=RootPageID, quiet=quiet, regex=regex)
 
@@ -119,7 +137,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	discovered_wids = set([])
 	for url in discovered:
 		curl = clean(url)
-		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(curl)))
+		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(curl))[0]['WID'])
 	discovered_wids = list(discovered_wids)
 	discovered_wids.sort()
 	discovered_wids = [ str(wid) for wid in discovered_wids ]
@@ -162,42 +180,70 @@ def docrawl(url):
 	except Exception as e:
 		cursor = db.cursor()
 		cursor.execute('SELECT CID FROM Crawl WHERE isnull(endtime) ORDER BY starttime DESC LIMIT 1;')
-		CrawlID = cursor.fetchone()[0]
-		query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
-		print query
-		cursor.execute(query)
+		CrawlID = cursor.fetchone()
+		if CrawlID:
+			CrawlID = CrawlID[0]
+			query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
+			print query
+			cursor.execute(query)
 		db.close()
 		raise
 
-# docrawl(url)
+docrawl(url)
 
-query = 'SELECT fromWID, toWID FROM Link'
+
+	# print words
+	# words = 
+
+	# words = [ {
+	# 	'pos':word[0], 
+	# 	'stem':word[1][0]['stem'],
+	# 	'oid':oid,
+	# } for word in words ]
+
+	# insert(db, 'Word', words)
+
+	# print words
+	# for word in words:
+	# 	print word
+	# for pos, word in enumerate(words):
+	# 	s = select_or_insert(db, 'Stem', stem=word)
+		
+
+
+
+# s = "I'll find you"
+s = "The deer shall find fraud and more fraud in the house of the watermelons"
+# s = "To be or not to be?  That is the question."
+# print parse_text(s,0)
+# print insert1(db, 'Stem', stem="ROOF")
+
+# print select_or_insert(db, 'Stem', stem='MONTH')
+
+query = 'SELECT stem, CAST(created_at AS DATETIME) AS created_at FROM Stem'
 cursor.execute(query)
 pretty(cursor)
 
-# n = 4528
-# # n = 10
+query = 'SELECT RID, stem, OID, pos, CAST(created_at AS DATETIME) AS created_at FROM Word'
+cursor.execute(query)
+pretty(cursor)
 
-# row = [0]*(n+1)
-# matrix = [ row[:] for x in range(n+1) ]
+# print default
 
-# # matrix[8][3] = 1
-# for fromWID, toWID in cursor:
-# 	print fromWID, toWID
-# 	# try:
-# 	# 	matrix[fromWID][toWID] = 1
-# 	# except Exception as e:
-# 	# 	print fromWID, toWID
-# 	# 	raise
 
-# for row in matrix:
-# 	print ','.join([ str(x) for x in row ])
+# k = 'antidisestablishmentarianism'
+# # while k != stem(k):
+# k = stem(k)
+# k = stem(k)
+# print k
+
+# print help(porter.stem)
+# print porter.stem('landmark')
+
+
+# query = 'SELECT fromWID, toWID FROM Link'
+# cursor.execute(query)
+# pretty(cursor)
+
 
 db.close()
-
-# print get_soup(url)
-
-
-# cursor = db.cursor()
-# cursor.execute('SELECT CID FROM Crawl WHERE isnull(endtime) ORDER BY starttime DESC LIMIT 1;')
-# print cursor.fetchone()[0]
