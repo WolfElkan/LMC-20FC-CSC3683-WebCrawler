@@ -1,16 +1,8 @@
 import pymysql
-from pw import password
 from table import lodify
 from utf import escape
-
-db_params = {
-	'host':"127.0.0.1",
-	'port':3306,
-	'user':"root",
-	'password':password,
-	'database':"Crawler",
-	'autocommit':True,
-}
+from settings import db_params
+from text import clean, stringify, stringify_if_unicode
 
 tables = {}
 
@@ -21,38 +13,30 @@ ShowTables.execute('SHOW TABLES')
 def get_columns(table):
 	return set(tables[table])
 
-
-# print dir(cursor)
-# print cursor
-
 for table in ShowTables:
-	# print table
 	DescribeTable = db.cursor()
 	DescribeTable.execute('DESCRIBE '+table[0])
 	table_columns = [x[0].lower() for x in DescribeTable]
 	tables[table[0]] = table_columns
 
-# print tables
-
-def clean(text):
-	# text = bytes(text)
-	# print text
-	return "".join(i if ord(i)<128 else escape(ord(i),'%').upper() for i in text)
-	if type(text) is unicode:
-		text = str(text)
-	# return text
-
-def stringify(value):
-	if type(value) is str:
-		return '"'+value+'"'
-	elif type(value) is unicode:
-		return str('"'+clean(value)+'"')
+def select_or_insert(db, table, **kwery):
+	if 'quiet' in kwery:
+		quiet = kwery['quiet']
+		del kwery['quiet']
 	else:
-		return str(value)
-
-def stringify_if_unicode(value):
-	if type(value) is unicode:
-		return stringify(value)
+		quiet = False
+	cursor = db.cursor()
+	query = ', '.join([ '`'+kv[0]+'`='+stringify(kv[1]) for kv in kwery.items() ])
+	query = 'SELECT * from {} WHERE {} LIMIT 1;'.format(table, query)
+	if not quiet:
+		print query
+	cursor.execute(query)
+	if cursor.rowcount:
+		print 'yes'
+		return lodify(cursor)
+	else:
+		print 'no'
+		return insert(db, table, [kwery], quiet=quiet)
 
 def insert1(db, table, **data):
 	quiet = False
@@ -98,8 +82,8 @@ def insert(db, table, data=None, quiet=False):
 					allblank = False
 				else:
 					valrow.append('NULL')
-			if allblank:
-				values.append('-- Empty Record')
+			# if allblank:
+			# 	values.append('-- Empty Record')
 			else:
 				values.append(str(tuple(valrow)))
 		query = 'INSERT INTO {} ( `{}` ) VALUES {};'
@@ -115,8 +99,8 @@ def insert(db, table, data=None, quiet=False):
 	LastIn = db.cursor()
 	lastin = 'SELECT * FROM {} ORDER BY created_at DESC LIMIT {};'.format(table, len(data))
 	if not quiet:
-		print query, '-- query'
-		print lastin, '-- lastin'
+		print query
+		print lastin
 	MainQuery.execute(query)
 	LastIn.execute(lastin)
 	return lodify(LastIn)

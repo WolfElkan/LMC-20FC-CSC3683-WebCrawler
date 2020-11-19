@@ -6,11 +6,18 @@ from table import pretty, lodify
 from parse_url import parse_url, rebuild
 from stem import PorterStemmer
 from stopwords import default, cap
+from record import Table
 
 default = cap(default)
 
 db = pymysql.connect(**db_params)
-cursor = db.cursor()
+
+Crawl = Table(db, 'Crawl')
+Link = Table(db, 'Link')
+Observation = Table(db, 'Observation')
+Webpage = Table(db, 'Webpage')
+Word = Table(db, 'Word')
+Stem = Table(db, 'Stem')
 
 def get_soup(url):
 	# print url
@@ -45,70 +52,75 @@ def parse_text(text, oid):
 	words = enumerate(words)
 	words = filter(lambda word: word[1] not in default, words)
 	words = [ str(word) for word in words ]
-	words = [ (word[0], select_or_insert(db, 'Stem', stem=word[1])[0]['stem']) for word in words ]
+	words = [ (word[0], Stem.select_or_insert(stem=word[1])['stem']) for word in words ]
 	words = [ {
 		'stem':word[1],
 		'oid':oid,
 		'pos':word[0],
 	} for word in words ]
-	return insert(db, 'Word', words)
+	return Word.insertlod(words)
 
 def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 	soup = get_soup(url)
 	if soup:
 
 		if wid is None:
-			wid = select_or_insert(db, 'Webpage', url=url)[0]['WID']
+			wid = Webpage.select_or_insert(url=url)['WID']
 
 		# Record the mined data
-		oid = insert1(db, 'Observation', 
+		oid = Observation.insert1(
 			WID=wid, 
 			CID=cid, 
 			# html=unicode(soup.text), 
 			quiet=True,
-		)[0]['OID']
+		)['OID']
 		parse_text(soup.text, oid)
 
 		# Record that this link has been mined
+		Update = db.cursor()
 		query = 'UPDATE Webpage SET mined=True WHERE wid IN ({});'.format(str(wid))
 		if not quiet:
 			print query
-		cursor.execute(query)
+		Update.execute(query)
+		Update.close()
 
 		links = get_links(soup, url)
 		links = set(filter(lambda link: re.match(regex, link), links))
 
 		if links:
+			SelectWID = db.cursor()
 			sqlinks = ','.join([ stringify(link.replace('"','%22')) for link in links ])
 			query = 'SELECT wid FROM Webpage WHERE url IN ({});'.format(sqlinks)
 			if not quiet:
 				print query
-			cursor.execute(query)
+			SelectWID.execute(query)
+			SelectWID.close()
 		
 		# insert(db, 'Link', [ {'fromWID':str(clean(url)),'toWID':row[0]} for row in cursor ], quiet=quiet)
-		insert(db, 'Link', [ {'fromWID':wid,'toWID':row[0]} for row in cursor ], quiet=quiet)
+		Link.insertlod([ {'fromWID':wid,'toWID':row[0]} for row in cursor ])
 
 		if links:
+			SelectURL = db.cursor()
 			sqlinks = ','.join([ stringify(link) for link in links ])
 			query = 'SELECT url FROM Webpage WHERE url IN ({});'.format(sqlinks)
 			if not quiet:
 				print query
-			cursor.execute(query)
+			SelectURL.execute(query)
+			SelectURL.close()
 
 			already = set([ row[0] for row in cursor ])
 			links -= already
 
 		if links:
 			sqlinks = ','.join([ stringify(link) for link in links ])
-			insert(db, 'Webpage', [ {'url':str(url),'newCID':cid} for url in links ], quiet=quiet)
+			Webpage.insert([ {'url':str(url),'newCID':cid} for url in links ])
 
 	return soup
 
 def crawl(root,regex=r'^.*$',level=1,quiet=False):
-	cursor = db.cursor()
 
-	RootPageID = select_or_insert(db, 'Webpage', url=root, quiet=quiet)[0]['WID']
-	CrawlID = insert1(db, 'Crawl', rootwid=RootPageID, nLevels=level)[0]['CID']
+	RootPageID = Webpage.select_or_insert(url=root)['WID']
+	CrawlID = Crawl.insert1(rootwid=RootPageID, nLevels=level)['CID']
 
 	soup = mine(root, cid=CrawlID, wid=RootPageID, quiet=quiet, regex=regex)
 
@@ -117,35 +129,40 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	discovered_wids = set([])
 	for url in discovered:
 		curl = clean(url)
-		discovered_wids.add(select_or_insert(db, 'Webpage', url=str(curl))[0]['WID'])
+		discovered_wids.add(Webpage.select_or_insert(url=str(curl))['WID'])
 	discovered_wids = list(discovered_wids)
 	discovered_wids.sort()
 	discovered_wids = [ str(wid) for wid in discovered_wids ]
 	if len(discovered_wids):
+		UpdateWebpage = db.cursor()
 		query = 'UPDATE Webpage SET newCID={cid} WHERE wid IN ({wids});'.format(cid=CrawlID, wids=','.join(discovered_wids))
 		if not quiet:
 			print query
-		cursor.execute(query)
+		UpdateWebpage.execute(query)
+		UpdateWebpage.close()
 	else:
 		print '-- No links'
-	insert(db, 'Link', [ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
+	Link.insert([ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
 
 	while level > 0:
+		SelectURL = db.cursor()
 		query = 'SELECT wid, url FROM Webpage WHERE newCID = {cid} AND mined=False;'.format(cid=CrawlID)
 		if not quiet:
 			print query
-		cursor = db.cursor()
-		cursor.execute(query)
-		for wid, url in cursor:
+		SelectURL.execute(query)
+		for wid, url in SelectURL:
 			# print url
 			mine(url, cid=CrawlID, wid=wid, quiet=quiet, regex=regex)
 			# crawl(url,level-1,CrawlID,quiet=quiet)
 		level -= 1
 		print '-- Level:', level
+		SelectURL.close()
+	FinalUpdate = db.cursor()
 	query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
 	if not quiet:
 		print query
-	cursor.execute(query)
+	FinalUpdate.execute(query)
+	FinalUpdate.close()
 	db.close()
 
 # url = 'https://bulbapedia.bulbagarden.net/wiki/Main_Page'
@@ -155,7 +172,7 @@ url = 'https://www.landmark.edu/'
 def docrawl(url):
 	try:
 		# crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki/[A-Za-z0-9]*')
-		crawl(url, quiet=False, level=10, regex=r'^https?://www\.landmark\.edu/*')
+		crawl(url, level=10, regex=r'^https?://www\.landmark\.edu/*')
 		pass
 	except Exception as e:
 		cursor = db.cursor()
@@ -166,43 +183,10 @@ def docrawl(url):
 			query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
 			print query
 			cursor.execute(query)
+		cursor.close()
 		db.close()
 		raise
 
 docrawl(url)
-
-# s = "I'll find you"
-s = "The deer shall find fraud and more fraud in the house of the watermelons"
-# s = "To be or not to be?  That is the question."
-# print parse_text(s,0)
-# print insert1(db, 'Stem', stem="ROOF")
-
-# print select_or_insert(db, 'Stem', stem='MONTH')
-
-query = 'SELECT stem, CAST(created_at AS DATETIME) AS created_at FROM Stem'
-cursor.execute(query)
-pretty(cursor)
-
-query = 'SELECT RID, stem, OID, pos, CAST(created_at AS DATETIME) AS created_at FROM Word'
-cursor.execute(query)
-pretty(cursor)
-
-# print default
-
-
-# k = 'antidisestablishmentarianism'
-# # while k != stem(k):
-# k = stem(k)
-# k = stem(k)
-# print k
-
-# print help(porter.stem)
-# print porter.stem('landmark')
-
-
-# query = 'SELECT fromWID, toWID FROM Link'
-# cursor.execute(query)
-# pretty(cursor)
-
 
 db.close()

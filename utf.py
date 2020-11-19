@@ -14,18 +14,6 @@ class revlist(list):
 def utf(codepoint):
 	bl = codepoint.bit_length()
 	if bl < 8:
-		return codepoint
-	byte_count = (bl + 3) / 5
-	result = 0
-	for x in xrange(byte_count):
-		result += codepoint % 2 ** 6 + 2 ** 7
-		codepoint >>= 6
-		result <<= 8
-	return result
-
-def utf(codepoint):
-	bl = codepoint.bit_length()
-	if bl < 8:
 		byte_count = 1
 		return [codepoint]
 	elif bl < 12:
@@ -44,7 +32,6 @@ def bits(val):
 	while val:
 		bites.append(val % 2 ** 8)
 		val >>= 8
-	# bites.reverse()
 	return bites
 
 def bitstr(val):
@@ -52,6 +39,3 @@ def bitstr(val):
 
 def escape(codepoint, ec='\\x'):
 	return ''.join([ ec+hex(byte)[2:].zfill(2) for byte in utf(codepoint) ])
-
-# n = 128
-# print [ bin(b) for b in utf(n) ]

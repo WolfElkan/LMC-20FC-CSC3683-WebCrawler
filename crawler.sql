@@ -4,10 +4,13 @@ USE Crawler;
 
 create table Crawl (
 	CID INT primary key auto_increment,
-    starttime DATETIME default NOW(),
-    endtime DATETIME,
+    starttime DATETIME(6) default NOW(6),
+    endtime DATETIME(6),
     nLevels INT,
-    rootWID INT references Webpage(WID)
+    rootWID INT references Webpage(WID),
+    created_at TIMESTAMP(6) default NOW(6),
+    updated_at TIMESTAMP(6) default NOW(6) ON UPDATE NOW(6),
+    access BOOLEAN
 );
 
 create table Webpage (
@@ -23,7 +26,9 @@ create table Webpage (
     -- query VARCHAR(256),
     -- ext VARCHAR(8),
     -- fragment VARCHAR(16)
-    created_at DATETIME(6) default NOW(6)
+    created_at TIMESTAMP(6) default NOW(6),
+    updated_at TIMESTAMP(6) default NOW(6) ON UPDATE NOW(6),
+    access BOOLEAN
 );
 
 create table Observation (
@@ -32,19 +37,25 @@ create table Observation (
     CID INT references Crawl(CID),
     http INT,
     html LONGTEXT,
-    created_at DATETIME(6) default NOW(6)
+    created_at TIMESTAMP(6) default NOW(6),
+    updated_at TIMESTAMP(6) default NOW(6) ON UPDATE NOW(6),
+    access BOOLEAN
 );
 
 create table Link (
 	lID INT PRIMARY KEY auto_increment,
     fromWID INT references Webpage(WID),
     toWID INT references Webpage(WID),
-    created_at DATETIME(6) default NOW(6)
+    created_at TIMESTAMP(6) default NOW(6),
+    updated_at TIMESTAMP(6) default NOW(6) ON UPDATE NOW(6),
+    access BOOLEAN
 );
 
 create table Stem (
 	stem VARCHAR(25) PRIMARY KEY,
-    created_at DATETIME(6) default NOW(6)
+    created_at TIMESTAMP(6) default NOW(6),
+    updated_at TIMESTAMP(6) default NOW(6) ON UPDATE NOW(6),
+    access BOOLEAN
 );
 
 create table Word (
@@ -52,6 +63,8 @@ create table Word (
 	stem VARCHAR(25) references Stem(stem),
     OID INT references Observation(OID),
     pos INT,
-    created_at DATETIME(6) default NOW(6)
+    created_at TIMESTAMP(6) default NOW(6),
+    updated_at TIMESTAMP(6) default NOW(6) ON UPDATE NOW(6),
+    access BOOLEAN
 )
     
