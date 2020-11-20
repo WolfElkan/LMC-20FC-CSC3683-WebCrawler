@@ -1,6 +1,7 @@
 import urllib2, re, datetime, pymysql
 from bs4 import BeautifulSoup
-from sql import insert, insert1, stringify, clean, select_or_insert
+# from sql import insert, insert1, select_or_insert
+from sql import clean, stringify
 from settings import db_params
 from table import pretty, lodify
 from parse_url import parse_url, rebuild
@@ -38,26 +39,36 @@ def get_links(soup, url, re=r'^.*$'):
 porter = PorterStemmer()
 
 def stem(p):
-	# p = re.match(r"^.*?[A-Za-z0-9']")
-	m = re.match(r"^\s*[<(]*(.*?)[.,?!:)>/]*\s*$", p)
+	# print p
+	m = re.match(r"^.*?([A-Za-z0-9']+).*$", p)
+	# m = re.match(r"^\s*[<(]*(\w*?)[.,?!:)>/]*\s*$", p)
 	if m:
+		# print m.groups()
 		p = m.groups()[0]
-	p = porter.stem(p, 0, len(p)-1).upper()[:25]
+	p = porter.stem(p, 0, len(p)-1).upper()
 	p = clean(p)
-	return p
+	if '\\' in p or max([ ord(c) for c in p ] + [0]) > 127:
+		return ''
+	# if '.' in p:
+	# 	return stem(re.match(r"^(.*?)\.", p).groups()[0].lower())
+	# # 	return stem(re.match(r"^(.*?)\xe2", p).groups()[0].lower())
+	# ultraascii = re.match(r"^(.*?)[^[:ascii:]]", p)
+	# if ultraascii:
+	# 	return stem(ultraascii.groups()[0].lower())
+	return p[:25]
 
 def parse_text(text, oid):
 	words = [ stem(word) for word in re.split(r'\s+',text) ]
-	words = filter(lambda word: word, words)
 	words = enumerate(words)
+	words = filter(lambda word: word, words)
 	words = filter(lambda word: word[1] not in default, words)
-	words = [ str(word) for word in words ]
-	words = [ (word[0], Stem.select_or_insert(stem=word[1])['stem']) for word in words ]
+	words = [ (pos, str(word)) for pos, word in words ]
+	words = [ (pos, Stem.select_or_insert(stem=word)['stem']) for pos, word in words ]
 	words = [ {
-		'stem':word[1],
+		'stem':word,
 		'oid':oid,
-		'pos':word[0],
-	} for word in words ]
+		'pos':pos,
+	} for pos, word in words ]
 	return Word.insertlod(words)
 
 def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
@@ -72,7 +83,7 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 			WID=wid, 
 			CID=cid, 
 			# html=unicode(soup.text), 
-			quiet=True,
+			# quiet=True,
 		)['OID']
 		parse_text(soup.text, oid)
 
@@ -87,33 +98,45 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 		links = get_links(soup, url)
 		links = set(filter(lambda link: re.match(regex, link), links))
 
+		links = [ link.replace('"','%22') for link in links ]
+
 		if links:
-			SelectWID = db.cursor()
-			sqlinks = ','.join([ stringify(link.replace('"','%22')) for link in links ])
-			query = 'SELECT wid FROM Webpage WHERE url IN ({});'.format(sqlinks)
-			if not quiet:
-				print query
-			SelectWID.execute(query)
-			SelectWID.close()
+			pages = Webpage.sim('url', links)
+			Link.insertlod([ {'fromWID':wid,'toWID':row['WID']} for row in pages ])
+
+			# exit()
+
+		# if links:
+		# 	SelectWID = db.cursor()
+		# 	sqlinks = ','.join([ stringify(link.replace('"','%22')) for link in links ])
+		# 	query = 'SELECT WID FROM Webpage WHERE url IN ({});'.format(sqlinks)
+		# 	print query
+		# 	SelectWID.execute(query)
+		# 	print
+		# 	already = set(SelectWID)
+		# 	# pretty(SelectWID)
+		# 	SelectWID.close()
+
+		# 	links - already
 		
-		# insert(db, 'Link', [ {'fromWID':str(clean(url)),'toWID':row[0]} for row in cursor ], quiet=quiet)
-		Link.insertlod([ {'fromWID':wid,'toWID':row[0]} for row in cursor ])
+		# 	exit()
+		# 	Link.insertlod([ {'fromWID':wid,'toWID':row} for row in links ])
 
-		if links:
-			SelectURL = db.cursor()
-			sqlinks = ','.join([ stringify(link) for link in links ])
-			query = 'SELECT url FROM Webpage WHERE url IN ({});'.format(sqlinks)
-			if not quiet:
-				print query
-			SelectURL.execute(query)
-			SelectURL.close()
+		# if links:
+		# 	SelectURL = db.cursor()
+		# 	sqlinks = ','.join([ stringify(link) for link in links ])
+		# 	query = 'SELECT url FROM Webpage WHERE url IN ({});'.format(sqlinks)
+		# 	if not quiet:
+		# 		print query
+		# 	SelectURL.execute(query)
+		# 	SelectURL.close()
 
-			already = set([ row[0] for row in cursor ])
-			links -= already
+		# 	already = set([ row[0] for row in cursor ])
+		# 	links -= already
 
-		if links:
-			sqlinks = ','.join([ stringify(link) for link in links ])
-			Webpage.insert([ {'url':str(url),'newCID':cid} for url in links ])
+		# if links:
+		# 	sqlinks = ','.join([ stringify(link) for link in links ])
+		# 	Webpage.insert([ {'url':str(url),'newCID':cid} for url in links ])
 
 	return soup
 
@@ -142,7 +165,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 		UpdateWebpage.close()
 	else:
 		print '-- No links'
-	Link.insert([ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
+	Link.insertlod([ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
 
 	while level > 0:
 		SelectURL = db.cursor()
@@ -175,6 +198,11 @@ def docrawl(url):
 		crawl(url, level=10, regex=r'^https?://www\.landmark\.edu/*')
 		pass
 	except Exception as e:
+		raise
+	finally:
+		print 
+		print '*'*88
+		print
 		cursor = db.cursor()
 		cursor.execute('SELECT CID FROM Crawl WHERE isnull(endtime) ORDER BY starttime DESC LIMIT 1;')
 		CrawlID = cursor.fetchone()
@@ -183,10 +211,16 @@ def docrawl(url):
 			query = 'UPDATE Crawl SET endtime="{now}" WHERE cid = {cid};'.format(cid=CrawlID, now=datetime.datetime.now())
 			print query
 			cursor.execute(query)
+
+		Crawl.__exit__()
+		Link.__exit__()
+		Observation.__exit__()
+		Webpage.__exit__()
+		Word.__exit__()
+		Stem.__exit__()
 		cursor.close()
 		db.close()
-		raise
 
 docrawl(url)
 
-db.close()
+# print max([ ord(c) for c in p ]) > 127

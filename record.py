@@ -2,7 +2,8 @@ import pymysql
 from decimal import Decimal
 from table import lodify, pretty
 from settings import db_params
-db = pymysql.connect(**db_params)
+from sql import stringify
+# db = pymysql.connect(**db_params)
 
 def standardize(lod):
 	columns = set([])
@@ -48,25 +49,39 @@ def remove_access(lod):
 		del d['access']
 	return lod
 
+
 class Table(object):
 	"""docstring for Table"""
 	def __init__(self, db, name):
 		self.db = db
 		self.name = name
-		get_columns = db.cursor()
-		query = "DESCRIBE {};".format(self.name)
+		get_columns = self.db.cursor()
+		query = "DESCRIBE {table};".format(table=self.name)
 		print query
 		get_columns.execute(query)
+		get_columns.close()
 		# pretty(get_columns)
 		self.columns = lodify(get_columns)
 
+	def __exit__(self):
+		self.closeall()
+
+	def closeall(self):
+		CloseAccess = self.db.cursor()
+		query = 'UPDATE {table} SET `access` = FALSE WHERE `access` = TRUE;'
+		query = query.format(table=self.name)
+		print query
+		CloseAccess.execute(query)
+		CloseAccess.close()
+
 	def insertlod(self, lod):
+		"""Insert a List Of Dicts into table and return a List Of Dicts"""
 		cursor = self.InsertLOD(lod)
 		result = remove_access(lodify(cursor))
 		cursor.close()
 		return result
 
-	def InsertLOD(self, lod):
+	def InsertLOD(self, lod, keepopen=False):
 		lod = add_access(lod)
 		cols, data = standardize(lod)
 		query = 'INSERT INTO {table} ( `{column_list}` ) VALUES {values};'
@@ -80,21 +95,18 @@ class Table(object):
 		query = query.format(table=self.name,values=data,column_list=column_list)
 		query = query.replace(",)",")")
 		
-		MainQuery = db.cursor()
+		MainQuery = self.db.cursor()
 		print query
 		MainQuery.execute(query)
 
 		query = 'SELECT * FROM {table} WHERE `access` = TRUE;'
 		query = query.format(table=self.name)
 		print query
-		ResultQuery = db.cursor()
+		ResultQuery = self.db.cursor()
 		ResultQuery.execute(query)
 
-		query = 'UPDATE {table} SET `access` = FALSE WHERE `access` = TRUE;'
-		query = query.format(table=self.name)
-		print query
-		ResetQuery = db.cursor()
-		ResetQuery.execute(query)
+		if not keepopen:
+			self.closeall()
 
 		return ResultQuery
 
@@ -139,6 +151,38 @@ class Table(object):
 			mand.update(opt)
 			return self.InsertLOD([mand])
 
+	def SIM(self, field, values):
+		"""Select or Insert Multiple, return cursor"""
+		cleanvals = ','.join([ stringify(value) for value in values ])
+		values = set(values)
+		Already = self.db.cursor()
+		query = 'SELECT `{field}` FROM {table} WHERE `{field}` IN ({cleanvals});'
+		query = query.format(table=self.name, field=field, cleanvals=cleanvals)
+		print query
+		Already.execute(query)
+		new = values - set(Already)
+		Already.close()
+
+		self.InsertLOD([ {field:val, 'access':True} for val in new ], keepopen=True)
+
+		query = 'SELECT * FROM {table} WHERE `access` = TRUE;'
+		query = query.format(table=self.name)
+		print query
+		ResultQuery = self.db.cursor()
+		ResultQuery.execute(query)
+
+		self.closeall()
+
+		return ResultQuery
+
+	def sim(self, field, values):
+		cursor = self.SIM(field, values)
+		result = remove_access(lodify(cursor))
+		cursor.close()
+		return result
+
+
+
 	def insert1(self, **data):
 		return self.insertlod([data])[0]
 
@@ -166,10 +210,11 @@ class Record(object):
 		self.data = data
 	def populate(self):
 		pass
+
 		
 # class QuerySet(object):
 # 	"""docstring for QuerySet"""
 # 	def __init__(self, table, records):
 # 		self.table = table
 # 		self.records = records
-db.close()
+# db.close()

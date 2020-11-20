@@ -174,6 +174,8 @@ default = [
 	"yours",
 	"yourself",
 	"yourselves",
+
+	"&",
 ]
 
 mysql = [
@@ -199,7 +201,7 @@ mysql = [
 	"consider",      "considering",   "contain",       "containing",    "contains",     
 	"corresponding", "could",         "couldn't",      "course",        "currently",    
 	"definitely",    "described",     "despite",       "did",           "didn't",
-	"different",     "do",            "does",          "doesn't", "doing",        
+	"different",     "do",            "does",          "doesn't",       "doing",        
 	"don't",         "done",          "down",          "downwards",     "during",       
 	"each",          "edu",           "eg",            "eight",         "either",       
 	"else",          "elsewhere",     "enough",        "entirely",      "especially",   
