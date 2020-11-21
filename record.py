@@ -98,12 +98,14 @@ class Table(object):
 		MainQuery = self.db.cursor()
 		print query
 		MainQuery.execute(query)
+		print '--<',MainQuery.rowcount
 
 		query = 'SELECT * FROM {table} WHERE `access` = TRUE;'
 		query = query.format(table=self.name)
 		print query
 		ResultQuery = self.db.cursor()
 		ResultQuery.execute(query)
+		print '-->',ResultQuery.rowcount
 
 		if not keepopen:
 			self.closeall()
@@ -160,6 +162,7 @@ class Table(object):
 		query = query.format(table=self.name, field=field, cleanvals=cleanvals)
 		print query
 		Already.execute(query)
+		print '-->',Already.rowcount
 		new = values - set(Already)
 		Already.close()
 
@@ -170,6 +173,7 @@ class Table(object):
 		print query
 		ResultQuery = self.db.cursor()
 		ResultQuery.execute(query)
+		print '-->',ResultQuery.rowcount
 
 		return ResultQuery
 

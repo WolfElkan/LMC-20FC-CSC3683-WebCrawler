@@ -38,7 +38,7 @@ def get_links(soup, url, re=r'^.*$'):
 
 porter = PorterStemmer()
 
-def maybestop(cid):
+def breakpoint(cid):
 	cur = Crawl.select(cid=cid)[0]
 	stop = cur['endtime']
 	if stop and stop < datetime.datetime.now():
@@ -136,9 +136,9 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 		)['OID']
 		parse_text(soup.text, oid)
 
-		maybestop(cid)
+		breakpoint(cid)
 		consolidate_all_webpages()
-		maybestop(cid)
+		breakpoint(cid)
 
 		# Record that this link has been mined
 		Update = db.cursor()
@@ -163,7 +163,7 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 			SetNewCID.execute(query)
 			Webpage.closeall()
 			Link.insertlod([ {'fromWID':wid,'toWID':row['WID']} for row in pages ])
-			maybestop(cid)
+			breakpoint(cid)
 		
 		# UpdateWebpage = db.cursor()
 		# query = 'UPDATE Webpage SET newCID={cid} WHERE wid IN ({wids});'.format(cid=CrawlID, wids=','.join(discovered_wids))
@@ -211,7 +211,8 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 def crawl(root,regex=r'^.*$',level=1,quiet=False):
 
 	RootPageID = Webpage.select_or_insert(url=root)['WID']
-	CrawlID = Crawl.insert1(rootwid=RootPageID, nLevels=level)['CID']
+	CrawlID = Crawl.insert1(rootwid=RootPageID, nLevels=level, access=True)['CID']
+	# exit()
 
 	soup = mine(root, cid=CrawlID, wid=RootPageID, quiet=quiet, regex=regex)
 
@@ -237,7 +238,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 	Link.insertlod([ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
 
 	while level > 0:
-		maybestop(cid)
+		breakpoint(CrawlID)
 		SelectURL = db.cursor()
 		query = 'SELECT wid, url FROM Webpage WHERE newCID = {cid} AND mined=False;'.format(cid=CrawlID)
 		if not quiet:
@@ -245,7 +246,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 		SelectURL.execute(query)
 		for wid, url in SelectURL:
 			mine(url, cid=CrawlID, wid=wid, quiet=quiet, regex=regex)
-			maybestop(cid)
+			breakpoint(CrawlID)
 		level -= 1
 		print '-- Level:', level
 		SelectURL.close()
@@ -263,7 +264,7 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 def docrawl(url, regex=r'^.*$'):
 	try:
 		# crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki/[A-Za-z0-9]*')
-		crawl(url, level=5, regex=regex)
+		crawl(url, level=3, regex=regex)
 		pass
 	except Exception as e:
 		raise
@@ -272,7 +273,10 @@ def docrawl(url, regex=r'^.*$'):
 		print '*'*88
 		print
 		cursor = db.cursor()
-		cursor.execute('SELECT CID FROM Crawl WHERE isnull(endtime) ORDER BY starttime DESC LIMIT 1;')
+		query = 'SELECT CID FROM Crawl WHERE access = TRUE ORDER BY starttime DESC LIMIT 1;'
+		print query
+		cursor.execute(query)
+		print '-->', cursor.rowcount
 		CrawlID = cursor.fetchone()
 		if CrawlID:
 			CrawlID = CrawlID[0]
