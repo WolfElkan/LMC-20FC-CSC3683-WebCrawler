@@ -292,26 +292,3 @@ def docrawl(url, regex=r'^.*$'):
 		Stem.__exit__()
 		cursor.close()
 		db.close()
-
-# START = datetime.datetime.now()
-# print START
-
-# consolidate_all_webpages()
-
-
-# END = datetime.datetime.now()
-# print START
-# print END
-# print END - START
-
-
-# docrawl('https://www.landmark.edu/',r'^https?://www\.landmark\.edu/*')
-# docrawl('https://pokemon.fandom.com/f',r'^https?://pokemon\.fandom\.com/*')
-docrawl('https://www.reddit.com/')
-# docrawl('https://www.keene.edu/',r'^https?://www\.keene\.edu/*'))
-# docrawl('https://www.moody.edu/',r'^https?://www\.moody\.edu/*')
-# docrawl('https://www.harvard.edu/',r'^https?://www\.harvard\.edu/*')
-# docrawl('https://www.yale.edu/',r'^https?://www\.yale\.edu/*')
-# docrawl('https://www.berkeley.edu/',r'^https?://www\.berkeley\.edu/*')
-
-# print max([ ord(c) for c in p ]) > 127
