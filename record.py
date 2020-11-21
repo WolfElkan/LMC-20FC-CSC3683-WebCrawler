@@ -171,20 +171,20 @@ class Table(object):
 		ResultQuery = self.db.cursor()
 		ResultQuery.execute(query)
 
-		self.closeall()
-
 		return ResultQuery
 
 	def sim(self, field, values):
 		cursor = self.SIM(field, values)
 		result = remove_access(lodify(cursor))
 		cursor.close()
+		self.closeall()
 		return result
-
-
 
 	def insert1(self, **data):
 		return self.insertlod([data])[0]
+
+	# def consolidate(self, on):
+	# 	pass
 
 
 # Crawl = Table(db, 'Crawl')

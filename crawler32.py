@@ -7,7 +7,7 @@ from table import pretty, lodify
 from parse_url import parse_url, rebuild
 from stem import PorterStemmer
 from stopwords import default, cap
-from record import Table
+from record import Table, remove_access
 
 default = cap(default)
 
@@ -38,6 +38,45 @@ def get_links(soup, url, re=r'^.*$'):
 
 porter = PorterStemmer()
 
+def maybestop(cid):
+	cur = Crawl.select(cid=cid)[0]
+	stop = cur['endtime']
+	if stop and stop < datetime.datetime.now():
+		print datetime.datetime.now()
+		exit()
+
+def consolidate_webpage(newWID, oldWID):
+	Consolodate = db.cursor()
+	queries = [
+		'UPDATE Crawl SET rootWID = {newWID} WHERE rootWID = {oldWID};',
+		'UPDATE Observation SET WID = {newWID} WHERE WID = {oldWID};',
+		'UPDATE Link SET fromWID = {newWID} WHERE fromWID = {oldWID};',
+		'UPDATE Link SET toWID = {newWID} WHERE toWID = {oldWID};',
+		'DELETE FROM Webpage WHERE WID = {oldWID}'
+	]
+	queries = [ query.format(oldWID=oldWID, newWID=newWID) for query in queries ]
+	for query in queries:
+		print query
+		Consolodate.execute(query)
+	Consolodate.close()
+
+def consolidate_all_webpages():
+	ConsolodateAll = db.cursor()
+	query = '''
+	SELECT WU.WID AS newWID, WA.WID AS oldWID FROM Webpage WA
+	JOIN Webpage WU 
+	ON WU.url = WA.url
+	WHERE WU.WID IN (SELECT min(WU.wid) FROM Webpage WU GROUP BY url)
+	AND WU.WID != WA.WID
+	ORDER BY WU.WID, WA.WID;
+	'''
+	print query
+	ConsolodateAll.execute(query)
+	for row in ConsolodateAll:
+		consolidate_webpage(*row)
+	ConsolodateAll.close()
+
+
 def stem(p):
 	# print p
 	m = re.match(r"^.*?([A-Za-z0-9']+).*$", p)
@@ -55,6 +94,7 @@ def stem(p):
 	# ultraascii = re.match(r"^(.*?)[^[:ascii:]]", p)
 	# if ultraascii:
 	# 	return stem(ultraascii.groups()[0].lower())
+	p = p.replace('"','')
 	return p[:25]
 
 def parse_text(text, oid):
@@ -76,7 +116,16 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 	if soup:
 
 		if wid is None:
-			wid = Webpage.select_or_insert(url=url)['WID']
+			widCursor = Webpage.SelectOrInsert(mand={'url':url}, opt={'newCID':cid})
+			wid = lodify(widCursor)['WID']
+			widCursor.close()
+		else:
+			SetNewCID = db.cursor()
+			query = 'UPDATE Webpage SET newCID = {cid} WHERE WID = {wid};'
+			query = query.format(cid=cid, wid=wid)
+			print query
+			SetNewCID.execute(query)
+			SetNewCID.close()
 
 		# Record the mined data
 		oid = Observation.insert1(
@@ -86,6 +135,10 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 			# quiet=True,
 		)['OID']
 		parse_text(soup.text, oid)
+
+		maybestop(cid)
+		consolidate_all_webpages()
+		maybestop(cid)
 
 		# Record that this link has been mined
 		Update = db.cursor()
@@ -101,8 +154,23 @@ def mine(url, cid, regex=r'^.*$', wid=None, quiet=False):
 		links = [ link.replace('"','%22') for link in links ]
 
 		if links:
-			pages = Webpage.sim('url', links)
+			Pages = Webpage.SIM('url', links)
+			pages = remove_access(lodify(Pages))
+			Pages.close()
+			SetNewCID = db.cursor()
+			query = 'UPDATE Webpage SET newCID={newCID} WHERE access=TRUE;'
+			query = query.format(newCID=cid)
+			SetNewCID.execute(query)
+			Webpage.closeall()
 			Link.insertlod([ {'fromWID':wid,'toWID':row['WID']} for row in pages ])
+			maybestop(cid)
+		
+		# UpdateWebpage = db.cursor()
+		# query = 'UPDATE Webpage SET newCID={cid} WHERE wid IN ({wids});'.format(cid=CrawlID, wids=','.join(discovered_wids))
+		# if not quiet:
+		# 	print query
+		# UpdateWebpage.execute(query)
+		# UpdateWebpage.close()
 
 			# exit()
 
@@ -163,20 +231,21 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 			print query
 		UpdateWebpage.execute(query)
 		UpdateWebpage.close()
+		consolidate_all_webpages()
 	else:
 		print '-- No links'
 	Link.insertlod([ {'fromWID':RootPageID, 'toWID':url} for url in discovered_wids ])
 
 	while level > 0:
+		maybestop(cid)
 		SelectURL = db.cursor()
 		query = 'SELECT wid, url FROM Webpage WHERE newCID = {cid} AND mined=False;'.format(cid=CrawlID)
 		if not quiet:
 			print query
 		SelectURL.execute(query)
 		for wid, url in SelectURL:
-			# print url
 			mine(url, cid=CrawlID, wid=wid, quiet=quiet, regex=regex)
-			# crawl(url,level-1,CrawlID,quiet=quiet)
+			maybestop(cid)
 		level -= 1
 		print '-- Level:', level
 		SelectURL.close()
@@ -186,16 +255,15 @@ def crawl(root,regex=r'^.*$',level=1,quiet=False):
 		print query
 	FinalUpdate.execute(query)
 	FinalUpdate.close()
-	db.close()
+	# db.close()
 
 # url = 'https://bulbapedia.bulbagarden.net/wiki/Main_Page'
 # url = 'https://pokemon.fandom.com/wiki/List_of_Pok%C3%A9mon'
-url = 'https://www.landmark.edu/'
 
-def docrawl(url):
+def docrawl(url, regex=r'^.*$'):
 	try:
 		# crawl(url, quiet=False, level=10, regex=r'^https?://pokemon\.fandom\.com/wiki/[A-Za-z0-9]*')
-		crawl(url, level=10, regex=r'^https?://www\.landmark\.edu/*')
+		crawl(url, level=5, regex=regex)
 		pass
 	except Exception as e:
 		raise
@@ -221,6 +289,25 @@ def docrawl(url):
 		cursor.close()
 		db.close()
 
-docrawl(url)
+# START = datetime.datetime.now()
+# print START
+
+# consolidate_all_webpages()
+
+
+# END = datetime.datetime.now()
+# print START
+# print END
+# print END - START
+
+
+# docrawl('https://www.landmark.edu/',r'^https?://www\.landmark\.edu/*')
+# docrawl('https://pokemon.fandom.com/f',r'^https?://pokemon\.fandom\.com/*')
+docrawl('https://www.reddit.com/')
+# docrawl('https://www.keene.edu/',r'^https?://www\.keene\.edu/*'))
+# docrawl('https://www.moody.edu/',r'^https?://www\.moody\.edu/*')
+# docrawl('https://www.harvard.edu/',r'^https?://www\.harvard\.edu/*')
+# docrawl('https://www.yale.edu/',r'^https?://www\.yale\.edu/*')
+# docrawl('https://www.berkeley.edu/',r'^https?://www\.berkeley\.edu/*')
 
 # print max([ ord(c) for c in p ]) > 127
